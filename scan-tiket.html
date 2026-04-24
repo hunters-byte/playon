@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Scan Tiket — PlayOn</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Arial, sans-serif;
+  background: #0f172a;
+  color: #f1f5f9;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 16px 40px;
+}
+
+.label {
+  font-size: 11px;
+  color: #64748b;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.sub {
+  color: #64748b;
+  font-size: 13px;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+/* ── Kotak kamera ── */
+#reader-wrap {
+  width: 100%;
+  max-width: 340px;
+  background: #1e293b;
+  border: 2px solid #334155;
+  border-radius: 16px;
+  overflow: hidden;
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#reader {
+  width: 100%;
+}
+
+/* Override style bawaan html5-qrcode agar rapi */
+#reader video { border-radius: 14px; }
+#reader img   { display: none; }
+
+#status-cam {
+  font-size: 12px;
+  color: #64748b;
+  margin: 10px 0 18px;
+  text-align: center;
+  width: 100%;
+  max-width: 340px;
+  min-height: 18px;
+}
+
+/* ── Tombol kamera manual ── */
+#btnStartCam {
+  display: none;
+  margin-bottom: 14px;
+  padding: 10px 22px;
+  background: #334155;
+  color: #94a3b8;
+  border: 1px solid #475569;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ── Divider ── */
+.divider {
+  color: #334155;
+  font-size: 12px;
+  text-align: center;
+  margin: 4px 0 14px;
+  width: 100%;
+  max-width: 340px;
+  position: relative;
+}
+.divider::before, .divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 43%;
+  height: 1px;
+  background: #1e293b;
+}
+.divider::before { left: 0; }
+.divider::after  { right: 0; }
+
+/* ── Input manual ── */
+#manual {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 340px;
+}
+
+#kodeInput {
+  flex: 1;
+  padding: 13px 14px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #f1f5f9;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+#kodeInput:focus { outline: none; border-color: #6366f1; }
+
+#btnCek {
+  padding: 13px 18px;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  font-weight: 700;
+  white-space: nowrap;
+}
+#btnCek:active { background: #4f46e5; transform: scale(0.97); }
+
+/* ── Hasil ── */
+#loading {
+  font-size: 13px;
+  color: #6366f1;
+  margin-top: 14px;
+  display: none;
+}
+
+#hasil {
+  width: 100%;
+  max-width: 340px;
+  border-radius: 14px;
+  padding: 22px 20px;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 700;
+  display: none;
+  margin-top: 16px;
+  line-height: 1.5;
+}
+
+#hasil.valid   { background: #022c22; border: 2px solid #10b981; color: #6ee7b7; }
+#hasil.dipakai { background: #2d1a00; border: 2px solid #f59e0b; color: #fcd34d; }
+#hasil.error   { background: #2d0a0a; border: 2px solid #ef4444; color: #fca5a5; }
+
+.detail {
+  font-size: 13px;
+  font-weight: 400;
+  color: #94a3b8;
+  margin-top: 8px;
+}
+
+#btnReset {
+  margin-top: 14px;
+  padding: 11px 28px;
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  display: none;
+}
+</style>
+</head>
+<body>
+
+<p class="label">E-Ticket System</p>
+<h1>PlayOn</h1>
+<p class="sub">Scan QR Code tiket peserta</p>
+
+<div id="reader-wrap">
+  <div id="reader"></div>
+</div>
+<p id="status-cam">Memuat kamera...</p>
+<button id="btnStartCam" onclick="mulaiKamera()">Coba Aktifkan Kamera Lagi</button>
+
+<div class="divider">atau input manual</div>
+
+<div id="manual">
+  <input type="text" id="kodeInput"
+         placeholder="TKTPLYNON-0000"
+         maxlength="20"
+         autocomplete="off"
+         autocorrect="off"
+         spellcheck="false">
+  <button id="btnCek" onclick="cekManual()">Cek</button>
+</div>
+
+<div id="loading">Mengecek tiket...</div>
+<div id="hasil"></div>
+<button id="btnReset" onclick="resetScan()">Scan Berikutnya</button>
+
+<script>
+// ============================================================
+//  GANTI URL INI dengan URL deployment Google Apps Script kamu
+//  Bentuknya: https://script.google.com/macros/s/XXXX.../exec
+// ============================================================
+const WEB_APP_URL = "GANTI_DENGAN_URL_DEPLOYMENT_APPS_SCRIPT_KAMU";
+
+// ============================================================
+
+let scanner      = null;
+let sedangProses = false;
+let kameraAktif  = false;
+
+// Coba mulai kamera otomatis saat halaman dibuka
+window.addEventListener("load", () => {
+  mulaiKamera();
+});
+
+function mulaiKamera() {
+  document.getElementById("btnStartCam").style.display = "none";
+  document.getElementById("status-cam").textContent    = "Meminta izin kamera...";
+
+  if (!scanner) {
+    scanner = new Html5Qrcode("reader");
+  }
+
+  Html5Qrcode.getCameras()
+    .then(cameras => {
+      if (!cameras || cameras.length === 0) {
+        statusKameraGagal("Tidak ada kamera terdeteksi di perangkat ini.");
+        return;
+      }
+
+      // Cari kamera belakang, kalau tidak ada pakai yang terakhir
+      const cam = cameras.find(c =>
+        /back|rear|environment|belakang/i.test(c.label)
+      ) || cameras[cameras.length - 1];
+
+      return scanner.start(
+        cam.id,
+        {
+          fps        : 15,
+          qrbox      : { width: 220, height: 220 },
+          aspectRatio: 1.0,
+          // Paksa environment facing untuk HP
+          videoConstraints: {
+            deviceId   : { exact: cam.id },
+            facingMode : "environment",
+          }
+        },
+        (kode) => {
+          if (sedangProses) return;
+          sedangProses = true;
+          kameraAktif  = true;
+          try { scanner.pause(true); } catch(e) {}
+          document.getElementById("status-cam").textContent = "QR terdeteksi!";
+          kirimKode(kode.trim().toUpperCase());
+        },
+        () => { /* scan error diabaikan */ }
+      );
+    })
+    .then(() => {
+      kameraAktif = true;
+      document.getElementById("status-cam").textContent = "Kamera aktif — arahkan ke QR Code tiket";
+    })
+    .catch(err => {
+      console.warn("Kamera error:", err);
+      if (/permission|denied|notallowed/i.test(String(err))) {
+        statusKameraGagal("Izin kamera ditolak. Aktifkan izin kamera di browser lalu refresh halaman.");
+      } else {
+        statusKameraGagal("Kamera tidak dapat diakses. Gunakan input manual di bawah.");
+      }
+    });
+}
+
+function statusKameraGagal(pesan) {
+  document.getElementById("status-cam").textContent    = pesan;
+  document.getElementById("btnStartCam").style.display = "inline-block";
+}
+
+function cekManual() {
+  const kode = document.getElementById("kodeInput").value.trim().toUpperCase();
+  if (!kode) { alert("Masukkan kode tiket terlebih dahulu!"); return; }
+  if (sedangProses) return;
+  sedangProses = true;
+  kirimKode(kode);
+}
+
+// Kirim ke Apps Script — POST dengan fallback GET
+function kirimKode(kode) {
+  document.getElementById("loading").style.display = "block";
+  document.getElementById("hasil").style.display   = "none";
+  document.getElementById("btnReset").style.display = "none";
+
+  fetch(WEB_APP_URL, {
+    method  : "POST",
+    redirect: "follow",
+    headers : { "Content-Type": "application/x-www-form-urlencoded" },
+    body    : "kode=" + encodeURIComponent(kode),
+  })
+  .then(r => {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  })
+  .then(data => tampilHasil(data))
+  .catch(() => {
+    // Fallback: GET
+    fetch(WEB_APP_URL + "?kode=" + encodeURIComponent(kode), { redirect: "follow" })
+      .then(r => r.json())
+      .then(data => tampilHasil(data))
+      .catch(() => tampilHasil({ status: "ERROR", pesan: "Gagal terhubung. Cek koneksi internet." }));
+  });
+}
+
+function tampilHasil(data) {
+  document.getElementById("loading").style.display  = "none";
+  document.getElementById("btnReset").style.display = "inline-block";
+
+  const el = document.getElementById("hasil");
+  el.style.display = "block";
+  el.className = "";
+
+  if (data.status === "VALID") {
+    el.classList.add("valid");
+    el.innerHTML =
+      "TIKET VALID!<br>"
+      + "<span style='font-size:18px'>" + data.nama + "</span>"
+      + '<div class="detail">Jenis: <b>' + data.jenisTiket
+      + '</b> &nbsp;|&nbsp; Jersey: <b>' + data.ukuranJersey + '</b></div>';
+  } else if (data.status === "SUDAH_DIPAKAI") {
+    el.classList.add("dipakai");
+    el.innerHTML =
+      "TIKET SUDAH DIPAKAI!"
+      + "<div class='detail'>" + data.nama + "</div>";
+  } else {
+    el.classList.add("error");
+    el.innerHTML = data.pesan || "Kode tidak ditemukan.";
+  }
+}
+
+function resetScan() {
+  document.getElementById("hasil").style.display    = "none";
+  document.getElementById("loading").style.display  = "none";
+  document.getElementById("btnReset").style.display = "none";
+  document.getElementById("kodeInput").value        = "";
+  sedangProses = false;
+
+  if (kameraAktif) {
+    try { scanner.resume(); } catch(e) {}
+    document.getElementById("status-cam").textContent = "Kamera aktif — arahkan ke QR Code tiket";
+  }
+}
+</script>
+
+</body>
+</html>
