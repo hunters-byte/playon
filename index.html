@@ -55,11 +55,7 @@ h1 {
   justify-content: center;
 }
 
-#reader {
-  width: 100%;
-}
-
-/* Override style bawaan html5-qrcode agar rapi */
+#reader { width: 100%; }
 #reader video { border-radius: 14px; }
 #reader img   { display: none; }
 
@@ -174,6 +170,33 @@ h1 {
   margin-top: 8px;
 }
 
+.badge {
+  display: inline-block;
+  padding: 2px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+.badge-komunitas { background: #dbeafe; color: #1d4ed8; }
+.badge-umum      { background: #dcfce7; color: #166534; }
+
+/* ── Debug panel (hanya tampil saat ada error koneksi) ── */
+#debug-panel {
+  display: none;
+  width: 100%;
+  max-width: 340px;
+  margin-top: 12px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-all;
+}
+
 #btnReset {
   margin-top: 14px;
   padding: 11px 28px;
@@ -204,7 +227,7 @@ h1 {
 <div id="manual">
   <input type="text" id="kodeInput"
          placeholder="TKTPLYNON-0000"
-         maxlength="20"
+         maxlength="30"
          autocomplete="off"
          autocorrect="off"
          spellcheck="false">
@@ -213,22 +236,20 @@ h1 {
 
 <div id="loading">Mengecek tiket...</div>
 <div id="hasil"></div>
+<div id="debug-panel"></div>
 <button id="btnReset" onclick="resetScan()">Scan Berikutnya</button>
 
 <script>
 // ============================================================
 //  GANTI URL INI dengan URL deployment Google Apps Script kamu
-//  Bentuknya: https://script.google.com/macros/s/XXXX.../execa
 // ============================================================
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxWHr3iaYgGtK1oSzukTuzon6TGdPeY2aZsZ7YDqexkzjBm1pibh7MUBuICivbZ9i9C/exec";
-
 // ============================================================
 
 let scanner      = null;
 let sedangProses = false;
 let kameraAktif  = false;
 
-// Coba mulai kamera otomatis saat halaman dibuka
 window.addEventListener("load", () => {
   mulaiKamera();
 });
@@ -248,7 +269,6 @@ function mulaiKamera() {
         return;
       }
 
-      // Cari kamera belakang, kalau tidak ada pakai yang terakhir
       const cam = cameras.find(c =>
         /back|rear|environment|belakang/i.test(c.label)
       ) || cameras[cameras.length - 1];
@@ -259,7 +279,6 @@ function mulaiKamera() {
           fps        : 15,
           qrbox      : { width: 220, height: 220 },
           aspectRatio: 1.0,
-          // Paksa environment facing untuk HP
           videoConstraints: {
             deviceId   : { exact: cam.id },
             facingMode : "environment",
@@ -273,7 +292,7 @@ function mulaiKamera() {
           document.getElementById("status-cam").textContent = "QR terdeteksi!";
           kirimKode(kode.trim().toUpperCase());
         },
-        () => { /* scan error diabaikan */ }
+        () => {}
       );
     })
     .then(() => {
@@ -303,29 +322,55 @@ function cekManual() {
   kirimKode(kode);
 }
 
-// Kirim ke Apps Script — POST dengan fallback GET
+// ============================================================
+//  FIX UTAMA: Gunakan GET dengan .text() lalu parse JSON
+//  POST ke Apps Script dari browser eksternal kena CORS redirect
+//  sehingga response berupa HTML bukan JSON → .json() gagal
+// ============================================================
 function kirimKode(kode) {
-  document.getElementById("loading").style.display = "block";
-  document.getElementById("hasil").style.display   = "none";
-  document.getElementById("btnReset").style.display = "none";
+  document.getElementById("loading").style.display     = "block";
+  document.getElementById("hasil").style.display       = "none";
+  document.getElementById("btnReset").style.display    = "none";
+  document.getElementById("debug-panel").style.display = "none";
 
-  fetch(WEB_APP_URL, {
-    method  : "POST",
+  const url = WEB_APP_URL + "?kode=" + encodeURIComponent(kode);
+
+  fetch(url, {
+    method  : "GET",
     redirect: "follow",
-    headers : { "Content-Type": "application/x-www-form-urlencoded" },
-    body    : "kode=" + encodeURIComponent(kode),
   })
   .then(r => {
     if (!r.ok) throw new Error("HTTP " + r.status);
-    return r.json();
+    return r.text();
   })
-  .then(data => tampilHasil(data))
-  .catch(() => {
-    // Fallback: GET
-    fetch(WEB_APP_URL + "?kode=" + encodeURIComponent(kode), { redirect: "follow" })
-      .then(r => r.json())
-      .then(data => tampilHasil(data))
-      .catch(() => tampilHasil({ status: "ERROR", pesan: "Gagal terhubung. Cek koneksi internet." }));
+  .then(text => {
+    // Apps Script kadang membungkus JSON di dalam HTML redirect
+    // Coba parse langsung dulu, kalau gagal cari JSON di dalam text
+    try {
+      const data = JSON.parse(text);
+      tampilHasil(data);
+    } catch(e) {
+      // Cari pola JSON { ... } di dalam response (misal terbungkus HTML)
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          const data = JSON.parse(match[0]);
+          tampilHasil(data);
+        } catch(e2) {
+          tampilDebug("Response bukan JSON valid.", text);
+          tampilHasil({ status: "ERROR", pesan: "Gagal membaca respons server." });
+        }
+      } else {
+        // Response adalah halaman HTML (kemungkinan doGet return HTML bukan JSON)
+        // Ini terjadi kalau kode tiket ditemukan tapi doGet tidak dikonfigurasi untuk JSON
+        tampilDebug("Server mengembalikan HTML, bukan JSON. Cek setting doGet.", text.substring(0, 200));
+        tampilHasil({ status: "ERROR", pesan: "Server mengembalikan HTML. Pastikan Web App di-deploy ulang." });
+      }
+    }
+  })
+  .catch(err => {
+    tampilDebug("Fetch error: " + err.message, url);
+    tampilHasil({ status: "ERROR", pesan: "Gagal terhubung ke server. Cek koneksi internet." });
   });
 }
 
@@ -337,29 +382,54 @@ function tampilHasil(data) {
   el.style.display = "block";
   el.className = "";
 
+  // Badge kategori (Umum / Komunitas)
+  let badge = "";
+  if (data.sheetLabel) {
+    const isKomunitas = data.sheetLabel === "Komunitas";
+    badge = `<span class="badge ${isKomunitas ? 'badge-komunitas' : 'badge-umum'}">
+               ${data.sheetLabel.toUpperCase()}
+             </span><br>`;
+  }
+
   if (data.status === "VALID") {
     el.classList.add("valid");
     el.innerHTML =
-      "TIKET VALID!<br>"
-      + "<span style='font-size:18px'>" + data.nama + "</span>"
-      + '<div class="detail">Jenis: <b>' + data.jenisTiket
-      + '</b> &nbsp;|&nbsp; Jersey: <b>' + data.ukuranJersey + '</b></div>';
+      badge +
+      "TIKET VALID!<br>" +
+      "<span style='font-size:18px'>" + (data.nama || "-") + "</span>" +
+      "<div class='detail'>" +
+        (data.info ? data.info + "<br>" : "") +
+        "Jenis: <b>" + (data.jenisTiket || "-") + "</b>" +
+        " &nbsp;|&nbsp; Jersey: <b>" + (data.ukuranJersey || "-") + "</b>" +
+      "</div>";
+
   } else if (data.status === "SUDAH_DIPAKAI") {
     el.classList.add("dipakai");
     el.innerHTML =
-      "TIKET SUDAH DIPAKAI!"
-      + "<div class='detail'>" + data.nama + "</div>";
+      badge +
+      "TIKET SUDAH DIPAKAI!" +
+      "<div class='detail'>" + (data.nama || "") + "</div>";
+
   } else {
     el.classList.add("error");
-    el.innerHTML = data.pesan || "Kode tidak ditemukan.";
+    el.innerHTML = badge + (data.pesan || "Kode tidak ditemukan.");
   }
 }
 
+// Panel debug — hanya muncul saat error untuk membantu troubleshoot
+function tampilDebug(pesan, detail) {
+  const panel = document.getElementById("debug-panel");
+  panel.style.display = "block";
+  panel.innerHTML = "<b style='color:#f87171'>Debug:</b> " + pesan +
+    (detail ? "<br><span style='color:#475569'>" + detail + "</span>" : "");
+}
+
 function resetScan() {
-  document.getElementById("hasil").style.display    = "none";
-  document.getElementById("loading").style.display  = "none";
-  document.getElementById("btnReset").style.display = "none";
-  document.getElementById("kodeInput").value        = "";
+  document.getElementById("hasil").style.display       = "none";
+  document.getElementById("loading").style.display     = "none";
+  document.getElementById("btnReset").style.display    = "none";
+  document.getElementById("debug-panel").style.display = "none";
+  document.getElementById("kodeInput").value           = "";
   sedangProses = false;
 
   if (kameraAktif) {
