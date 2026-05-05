@@ -182,7 +182,18 @@ h1 {
 .badge-komunitas { background: #dbeafe; color: #1d4ed8; }
 .badge-umum      { background: #dcfce7; color: #166534; }
 
-/* ── Debug panel (hanya tampil saat ada error koneksi) ── */
+/* ── Countdown auto-reset ── */
+#countdown {
+  font-size: 11px;
+  color: #475569;
+  margin-top: 8px;
+  display: none;
+  text-align: center;
+  width: 100%;
+  max-width: 340px;
+}
+
+/* ── Debug panel ── */
 #debug-panel {
   display: none;
   width: 100%;
@@ -236,6 +247,7 @@ h1 {
 
 <div id="loading">Mengecek tiket...</div>
 <div id="hasil"></div>
+<div id="countdown"></div>
 <div id="debug-panel"></div>
 <button id="btnReset" onclick="resetScan()">Scan Berikutnya</button>
 
@@ -246,14 +258,60 @@ h1 {
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzblioJrIBttCjvVi-jIrln1uJ5SHv1eYpvADY2rtxbgXNdxvbfa1mhVrOT95XGRCVf/exec";
 // ============================================================
 
-let scanner      = null;
-let sedangProses = false;
-let kameraAktif  = false;
+let scanner        = null;
+let sedangProses   = false;
+let kameraAktif    = false;
+let timerCountdown = null; // untuk auto-reset countdown
+
+// ============================================================
+//  [BARU] Feedback suara via Web Audio API
+//  Tidak perlu file audio eksternal sama sekali
+// ============================================================
+function bunyikan(tipe) {
+  try {
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    if (tipe === "valid") {
+      // Bunyi "ting" naik — tiket valid
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(900, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+
+    } else if (tipe === "dipakai") {
+      // Bunyi "boop" rendah — sudah dipakai
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.4);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+
+    } else {
+      // Bunyi sangat rendah — error / tidak ditemukan
+      osc.frequency.setValueAtTime(200, ctx.currentTime);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.5);
+    }
+  } catch(e) {
+    // Browser tidak support Web Audio API, diabaikan
+  }
+}
 
 window.addEventListener("load", () => {
   mulaiKamera();
 });
 
+// ============================================================
+//  [OPTIMASI] fps 30 + resolusi 1280x720 + qrbox lebih kecil
+// ============================================================
 function mulaiKamera() {
   document.getElementById("btnStartCam").style.display = "none";
   document.getElementById("status-cam").textContent    = "Meminta izin kamera...";
@@ -275,16 +333,15 @@ function mulaiKamera() {
 
       return scanner.start(
         cam.id,
-        // Di fungsi mulaiKamera(), ubah config scanner:
         {
-          fps        : 30,          // naikan dari 15 → 30
-          qrbox      : { width: 180, height: 180 }, // perkecil area scan → lebih cepat fokus
+          fps        : 30,                          // [OPTIMASI] naik dari 15 → 30
+          qrbox      : { width: 180, height: 180 }, // [OPTIMASI] perkecil → lebih cepat fokus
           aspectRatio: 1.0,
           videoConstraints: {
-            deviceId   : { exact: cam.id },
-            facingMode : "environment",
-            width      : { ideal: 1280 }, // tambahkan resolusi ideal
-            height     : { ideal: 720  },
+            deviceId : { exact: cam.id },
+            facingMode: "environment",
+            width    : { ideal: 1280 },             // [OPTIMASI] resolusi ideal
+            height   : { ideal: 720  },
           }
         },
         (kode) => {
@@ -326,14 +383,13 @@ function cekManual() {
 }
 
 // ============================================================
-//  FIX UTAMA: Gunakan GET dengan .text() lalu parse JSON
-//  POST ke Apps Script dari browser eksternal kena CORS redirect
-//  sehingga response berupa HTML bukan JSON → .json() gagal
+//  JSONP — tidak kena CORS, reliable untuk Apps Script
 // ============================================================
 function kirimKode(kode) {
   document.getElementById("loading").style.display     = "block";
   document.getElementById("hasil").style.display       = "none";
   document.getElementById("btnReset").style.display    = "none";
+  document.getElementById("countdown").style.display   = "none";
   document.getElementById("debug-panel").style.display = "none";
 
   // Bersihkan script JSONP lama kalau ada
@@ -352,7 +408,7 @@ function kirimKode(kode) {
     }
   }, 10000);
 
-  // Definisikan fungsi callback global yang dipanggil oleh JSONP
+  // Fungsi callback global yang dipanggil oleh JSONP
   window[cbName] = function(data) {
     clearTimeout(timeout);
     delete window[cbName];
@@ -361,7 +417,7 @@ function kirimKode(kode) {
     tampilHasil(data);
   };
 
-  // Buat tag <script> dengan URL JSONP
+  // Sisipkan tag <script> JSONP
   const script  = document.createElement("script");
   script.id     = "jsonp-script";
   script.src    = WEB_APP_URL
@@ -376,6 +432,11 @@ function kirimKode(kode) {
 
   document.body.appendChild(script);
 }
+
+// ============================================================
+//  [OPTIMASI] Suara + auto-reset 3 detik khusus tiket VALID
+//  SUDAH_DIPAKAI & ERROR tidak auto-reset → panitia baca dulu
+// ============================================================
 function tampilHasil(data) {
   document.getElementById("loading").style.display  = "none";
   document.getElementById("btnReset").style.display = "inline-block";
@@ -405,6 +466,9 @@ function tampilHasil(data) {
         " &nbsp;|&nbsp; Jersey: <b>" + (data.ukuranJersey || "-") + "</b>" +
       "</div>";
 
+    bunyikan("valid");    // [BARU] bunyi "ting" naik
+    mulaiCountdown(3);    // [BARU] auto-reset 3 detik
+
   } else if (data.status === "SUDAH_DIPAKAI") {
     el.classList.add("dipakai");
     el.innerHTML =
@@ -412,13 +476,44 @@ function tampilHasil(data) {
       "TIKET SUDAH DIPAKAI!" +
       "<div class='detail'>" + (data.nama || "") + "</div>";
 
+    bunyikan("dipakai");  // [BARU] bunyi "boop" rendah
+    // Tidak auto-reset — panitia perlu baca & ambil tindakan
+
   } else {
     el.classList.add("error");
     el.innerHTML = badge + (data.pesan || "Kode tidak ditemukan.");
+
+    bunyikan("error");    // [BARU] bunyi sangat rendah
+    // Tidak auto-reset — panitia perlu coba lagi atau cek manual
   }
 }
 
-// Panel debug — hanya muncul saat error untuk membantu troubleshoot
+// ============================================================
+//  [BARU] Countdown mundur yang tampil di layar
+// ============================================================
+function mulaiCountdown(detik) {
+  const el = document.getElementById("countdown");
+  el.style.display = "block";
+
+  let sisa = detik;
+  el.textContent = "Scan berikutnya dalam " + sisa + " detik...";
+
+  // Bersihkan timer lama kalau masih jalan
+  if (timerCountdown) clearInterval(timerCountdown);
+
+  timerCountdown = setInterval(() => {
+    sisa--;
+    if (sisa <= 0) {
+      clearInterval(timerCountdown);
+      timerCountdown = null;
+      resetScan();
+    } else {
+      el.textContent = "Scan berikutnya dalam " + sisa + " detik...";
+    }
+  }, 1000);
+}
+
+// Panel debug — hanya muncul saat error
 function tampilDebug(pesan, detail) {
   const panel = document.getElementById("debug-panel");
   panel.style.display = "block";
@@ -427,9 +522,16 @@ function tampilDebug(pesan, detail) {
 }
 
 function resetScan() {
+  // Hentikan countdown kalau panitia klik "Scan Berikutnya" manual
+  if (timerCountdown) {
+    clearInterval(timerCountdown);
+    timerCountdown = null;
+  }
+
   document.getElementById("hasil").style.display       = "none";
   document.getElementById("loading").style.display     = "none";
   document.getElementById("btnReset").style.display    = "none";
+  document.getElementById("countdown").style.display   = "none";
   document.getElementById("debug-panel").style.display = "none";
   document.getElementById("kodeInput").value           = "";
   sedangProses = false;
