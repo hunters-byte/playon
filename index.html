@@ -275,13 +275,16 @@ function mulaiKamera() {
 
       return scanner.start(
         cam.id,
+        // Di fungsi mulaiKamera(), ubah config scanner:
         {
-          fps        : 15,
-          qrbox      : { width: 220, height: 220 },
+          fps        : 30,          // naikan dari 15 → 30
+          qrbox      : { width: 180, height: 180 }, // perkecil area scan → lebih cepat fokus
           aspectRatio: 1.0,
           videoConstraints: {
             deviceId   : { exact: cam.id },
             facingMode : "environment",
+            width      : { ideal: 1280 }, // tambahkan resolusi ideal
+            height     : { ideal: 720  },
           }
         },
         (kode) => {
