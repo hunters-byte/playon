@@ -333,47 +333,46 @@ function kirimKode(kode) {
   document.getElementById("btnReset").style.display    = "none";
   document.getElementById("debug-panel").style.display = "none";
 
-  const url = WEB_APP_URL + "?kode=" + encodeURIComponent(kode);
+  // Bersihkan script JSONP lama kalau ada
+  const scriptLama = document.getElementById("jsonp-script");
+  if (scriptLama) scriptLama.remove();
 
-  fetch(url, {
-    method  : "GET",
-    redirect: "follow",
-  })
-  .then(r => {
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return r.text();
-  })
-  .then(text => {
-    // Apps Script kadang membungkus JSON di dalam HTML redirect
-    // Coba parse langsung dulu, kalau gagal cari JSON di dalam text
-    try {
-      const data = JSON.parse(text);
-      tampilHasil(data);
-    } catch(e) {
-      // Cari pola JSON { ... } di dalam response (misal terbungkus HTML)
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          const data = JSON.parse(match[0]);
-          tampilHasil(data);
-        } catch(e2) {
-          tampilDebug("Response bukan JSON valid.", text);
-          tampilHasil({ status: "ERROR", pesan: "Gagal membaca respons server." });
-        }
-      } else {
-        // Response adalah halaman HTML (kemungkinan doGet return HTML bukan JSON)
-        // Ini terjadi kalau kode tiket ditemukan tapi doGet tidak dikonfigurasi untuk JSON
-        tampilDebug("Server mengembalikan HTML, bukan JSON. Cek setting doGet.", text.substring(0, 200));
-        tampilHasil({ status: "ERROR", pesan: "Server mengembalikan HTML. Pastikan Web App di-deploy ulang." });
-      }
+  // Nama callback unik agar tidak bentrok kalau scan cepat berulang
+  const cbName = "cb_" + Date.now();
+
+  // Timeout kalau server tidak response dalam 10 detik
+  const timeout = setTimeout(() => {
+    if (window[cbName]) {
+      delete window[cbName];
+      tampilDebug("Timeout — server tidak merespons dalam 10 detik.", "");
+      tampilHasil({ status: "ERROR", pesan: "Server tidak merespons. Coba lagi." });
     }
-  })
-  .catch(err => {
-    tampilDebug("Fetch error: " + err.message, url);
-    tampilHasil({ status: "ERROR", pesan: "Gagal terhubung ke server. Cek koneksi internet." });
-  });
-}
+  }, 10000);
 
+  // Definisikan fungsi callback global yang dipanggil oleh JSONP
+  window[cbName] = function(data) {
+    clearTimeout(timeout);
+    delete window[cbName];
+    const s = document.getElementById("jsonp-script");
+    if (s) s.remove();
+    tampilHasil(data);
+  };
+
+  // Buat tag <script> dengan URL JSONP
+  const script  = document.createElement("script");
+  script.id     = "jsonp-script";
+  script.src    = WEB_APP_URL
+                + "?kode="     + encodeURIComponent(kode)
+                + "&callback=" + cbName;
+  script.onerror = function() {
+    clearTimeout(timeout);
+    delete window[cbName];
+    tampilDebug("Script JSONP gagal dimuat.", script.src);
+    tampilHasil({ status: "ERROR", pesan: "Gagal terhubung ke server." });
+  };
+
+  document.body.appendChild(script);
+}
 function tampilHasil(data) {
   document.getElementById("loading").style.display  = "none";
   document.getElementById("btnReset").style.display = "inline-block";
